@@ -1,6 +1,6 @@
 #keras
 from keras.layers import Input,Conv1D,MaxPool1D,Dense,Dropout,Embedding,\
-Flatten,concatenate
+Flatten,concatenate,GRU
 from keras.models import Model,load_model
 from keras.callbacks import ModelCheckpoint,EarlyStopping
 
@@ -8,13 +8,43 @@ from keras.callbacks import ModelCheckpoint,EarlyStopping
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import train_test_split
 from sklearn.externals import joblib
+from sklearn.multioutput import MultiOutputClassifier
+
+from lightgbm import LGBMClassifier
 
 import numpy as np
 from time import ctime
 import pandas as pd
+from os.path import join
 from . import toxic_config
 
 
+def ensembleModels(modelsOutDir,filenames,weights):
+    '''
+    This function computes the weighed average of the output of 
+    several other outputs.
+    
+    Parameters
+    --------
+    modelsOutDir: str
+        Directory where the output of the other models are saved.
+    filenames: list
+        List of the filenames of the output of other models.
+    weights: array like
+        weights of the models.
+    '''
+    
+    for i,fn in enumerate(filenames):
+        if i==0:
+            df_en = pd.read_csv(join(modelsOutDir,fn))
+            df_en.iloc[:,1:]=weights[i]*df_en.iloc[:,1:]
+        else:
+            df = pd.read_csv(join(modelsOutDir,fn))
+            df_en.iloc[:,1:]=df_en.iloc[:,1:]+weights[i]*df.iloc[:,1:]
+
+    df_en.iloc[:,1:]=df_en.iloc[:,1:]/np.sum(weights)
+    df_en.to_csv(join(modelsOutDir,'ensemble.csv'),index=False)
+    
 #==================
 #BASE CLASSES
 #==================
@@ -69,18 +99,24 @@ class decisionTreeModel():
     base class for decision tree models.
     '''
     
-    def __init__(self,tox):
+    def __init__(self,tox,modelParams):
         self.model=None
-        self.tox=tox 
+        self.tox=tox
+        self.__buildModel__(modelParams) 
         
-    def fit(self,filepath,val_size=.1):
+    def fit(self,filepath,val_size=.1,monitor_eval=False,fitParams={}):
         
         #TODO: cross-validation
         print(ctime()+'...fitting model...')
         self.X_train,self.X_val,self.Y_train,self.Y_val=\
             train_test_split(self.tox.trainFeatureMat,
                              self.tox.Y_train,test_size=val_size)
-        self.model.fit(self.X_train,self.Y_train)
+        if monitor_eval:
+            fitParams.update({'eval_set':[(self.X_val,self.Y_val)]})
+            self.model.fit(self.X_train,self.Y_train,sample_weight=None,
+                           estimatorParam=fitParams)    
+        else:
+            self.model.fit(self.X_train,self.Y_train)
         
         print(ctime()+'...saving fitted model to file...')
         joblib.dump(self.model,filepath+'.pkl')
@@ -193,48 +229,94 @@ class cnn_model(KerasModels):
         self.model = Model(inputs=inputs,outputs=out)
         #===build model===
 
-
-#=======================
-#decision tree models
-#=======================  
-class randomForestModel(decisionTreeModel):
-
-    def __init__(self,tox,modelParams={'n_estimators':100,
-                                       'min_samples_split':None,
-                                       'class_weight':'balanced_subsample',
-                                       'max_features':'auto',                                       
-                                       'verbose':5}): 
-
+class gru_model(KerasModels):
+    
+    def __init__(self,tox,modelParams={'embed_dim':100,'n_dense':50,
+                                       'n_units1':100,'n_units2':100}):
+    
         '''
-        Constructor for a random forest model. 
-        
+        This function initialize a conv. neural netwok model with the 
+        following architecture:
+            The input is sequence of words. The first layer is an embedding
+            layer. The input layer is followed by two layers od GRU units.
+            The output of the last one is fed to a fully connected layer
+            with relu activation and ginally an output layer which
+            is a fully connected layer with sigmoid activation functions.
+             
+            
         Parameters
         ----------  
         tox: base.Toxic
             An object of class base.Toxic.
         modelParams: dict
-            parameters passed to `sklearn.ensemble.RandomForestClassifier`.
-        '''       
-        
+            it must contain the following fields:
+                `embed_dim`: dimension of the output of emebdding layer,
+                `n_units1`: number of neurons in the first GRU layer.
+                `n_units2`: number of neurons in the second GRU layer.
+                'n_dense': number of neurons of the dense layer
+        '''
         self.model=None
         self.tox=tox
-        self.__buildModel__(modelParams)    
-    
+        self.__buildModel__(modelParams)  
+        
     def __buildModel__(self,modelParams):
         '''
         This function builds the model.
         '''
         
-        #note that RandomForestClassifier supports multi-output 
+        #===model parameters===
+        embed_dim,n_units1,n_units2,n_dense=\
+            (modelParams['embed_dim'],
+             modelParams['n_units1'],
+             modelParams['n_units2'],
+             modelParams['n_dense'])
+        #===model parameters===
+        
+        #===build model===
+        #-input layer-
+        max_seq_len=self.tox.trainFeatureMat.shape[1]
+        dict_size=np.max((self.tox.trainFeatureMat.max(),
+                          self.tox.testFeatureMat.max()))
+        inputs = Input(shape=(max_seq_len,))
+        #-input layer-
+
+        #-embedding layer-
+        embed = Embedding(input_dim=dict_size+1,output_dim=embed_dim,
+                          input_length=max_seq_len)(inputs)
+        #-embedding layer-
+
+        #-GRU layers-
+        rl1=GRU(units=n_units1,return_sequences=True)(embed)
+        rl2=GRU(units=n_units2)(rl1)        
+        #-GRU layers-
+        
+        #-dense layer-
+        dense1=Dense(n_dense,activation='relu')(rl2)
+        #-dense layer-
+        
+        #-output-
+        out = Dense(6,activation='sigmoid')(dense1)
+        #-output-
+        
+        self.model = Model(inputs=inputs,outputs=out)
+        
+        
+        
+#=======================
+#decision tree models
+#=======================  
+class randomForestModel(decisionTreeModel):    
+    def __buildModel__(self,modelParams):
+        
+        #note that RandomForestClassifier supports multi-label 
         #classification.
-        self.model=RandomForestClassifier(
-                         n_estimators=modelParams['n_estimators'],
-                         min_samples_split=modelParams['min_samples_split'],
-                         class_weight=modelParams['class_weight'],
-                         max_features=modelParams['max_features'],
-                         verbose=modelParams['verbose'],
-                         n_jobs=-1)
+        self.model=RandomForestClassifier(n_jobs=-1,**modelParams)
         
+
+class lgbModel(decisionTreeModel):   
+    def __buildModel__(self,modelParams):
         
-        
+        #note that lgbm does not supports multi-output classification.
+        self.model=MultiOutputClassifier(LGBMClassifier(n_jobs=-1,
+                                                        **modelParams))
         
