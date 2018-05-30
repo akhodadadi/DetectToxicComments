@@ -146,10 +146,10 @@ class Toxic():
         s='_seqlen_{}_dictsize_{}_{}'.format(max_seq_len,dict_size,ext)
             
         if loadOrCompute=='compute':
-            #---load data if it not loaded yet---
+            #---load data if it is not loaded yet---
             if (len(self.trainData)==0) or (len(self.testData)==0):            
                 self.loadData(textType=textType)
-            #---load data if it not loaded yet---
+            #---load data if it is not loaded yet---
             
             #---target values---
             self.Y_train = np.array(self.trainData.iloc[:,2:],dtype='int8')
@@ -198,7 +198,7 @@ class Toxic():
                             loadOrCompute='compute',textType='sw_excluded'):
             
         if loadOrCompute=='compute':
-            #---load data if it not loaded yet---
+            #---load data if it is notloaded yet---
             if (len(self.trainData)==0) or (len(self.testData)==0):            
                 self.loadData(textType=textType)
             
@@ -209,7 +209,7 @@ class Toxic():
             train_texts=self.trainData.comment_text.tolist()
             test_texts=self.testData.comment_text.tolist()
             self.Y_train = np.array(self.trainData.iloc[:,2:],dtype='int8')
-            #---load data if it not loaded yet---
+            #---load data if it is notloaded yet---
             
             #---tfidf of words---
             print(ctime()+'...computing words tfidf...')
@@ -271,4 +271,78 @@ class Toxic():
             
             fn=join(self.dataDir,'Y_train')                                        
             self.Y_train=np.fromfile(fn,'int8').reshape((-1,6))
+            
+    def computeGlove(self,embed_dim,glovePath,dict_size=50000,
+                           textType='nw_excluded'):
+        '''
+        This function computes and saves the embedding matrix
+        corresponding to the Glove features.
+        
+        It will save the weights as numpy.array in self.dataDir.
+        
+        Parameters
+        ---------
+        embed_dim: int
+            glove embedding dimension. It should be one of [50,100,200,300].
+        glovePath: str
+            path to the glove pre-trained weights.
+        dict_size: int
+            dictionary size
+        textType: str 
+            see `self.loadData` for details.
+        '''
+        
+        if embed_dim not in [50,100,200,300]:
+            msg='embed_dim should be one of the following:[50,100,200,300]'
+            raise ValueError(msg)
+        
+        ext={'raw':'raw','sw_excluded':'sw',
+             'nw_excluded':'nw'}[textType]
+        
+        #---load data if it is not loaded yet---
+        if (len(self.trainData)==0) or (len(self.testData)==0):            
+            self.loadData(textType=textType)
+        #---load data if it is not loaded yet---
+        
+        #---target values---
+        self.Y_train = np.array(self.trainData.iloc[:,2:],dtype='int8')
+        #---target values---
+        
+        #---tokenizing the texts---
+        print(ctime()+'...tekenization...')
+        T=Tokenizer(num_words=dict_size)
+        train_texts=self.trainData.comment_text.tolist()
+        test_texts=self.testData.comment_text.tolist()
+        T.fit_on_texts(train_texts+test_texts)
+        #---tokenizing the texts---
+        
+        #---form a df containing words and thier index and count---
+        words_df=pd.DataFrame({'word':T.word_index.keys(),
+                               'word_idx':T.word_index.values()})
+        df=pd.DataFrame({'word':T.word_counts.keys(),
+                         'word_count':T.word_counts.values()})
+        words_df=words_df.merge(df,on='word')
+        #---form a df containing words and thier index and count---
+        
+        #---loading glove weights---
+        print(ctime()+'...loading glove weights into pandas df...')
+        fn=join(glovePath,'glove.6B.{}d.txt'.format(embed_dim))
+        glove_df=pd.read_csv(fn,engine='python',delim_whitespace=True,
+                             header=None)
+        glove_df.rename({0:'word'},axis=1,inplace=True)
+        #---loading glove weights---
+        
+        #---merge word_df and glove_df---
+        words_df=words_df.merge(glove_df,on='word',how='left')
+        words_df.fillna(0,inplace=True)
+        words_df.sort_values(by='word_idx',inplace=True)
+        embedding_weights=words_df.iloc[:,3:].values
+        #---merge word_df and glove_df---
+        
+        #---save the weights---
+        print(ctime()+'...saving weights...')
+        fn=join(self.dataDir,'embed_weights_dictsize_{}_d_{}_{}'.\
+                format(dict_size,embed_dim,ext))
+        embedding_weights.tofile(fn)
+        #---save the weights---
         
