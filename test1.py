@@ -1,6 +1,6 @@
 from toxic.base import Toxic
 from toxic.models import cnn_model,randomForestModel,lgbModel,gru_model,\
-ensembleModels
+ensembleModels,gru_glove_model
 from toxic import toxic_config
 from os.path import join
 
@@ -41,6 +41,25 @@ elif model=='gru':
     mdl.fit(save_model_path,epochs=10,patience=1)
     mdl.predict(dstDir=submissionsDir,loadModel=True,
                 modelPath=save_model_path)
+    
+elif model=='gru_glove':
+    modelParams={'embed_dim':100,'n_dense':50,'n_units1':100,'n_units2':100,
+                 'glove_embed_dim':50,'textType':'nw_excluded'}
+    
+    s= '_seqlen_{}_dictsize_{}'.format(max_seq_len,dict_size)
+    save_model_path=join(dataDir,'fittedModels/fittedModel_gru_glove'+s)
+    submissionsDir=join(dataDir,'submissions/gru_glove'+s+'.csv')
+    
+    T= Toxic()
+#    T.computeGlove(50,glovePath='/home/arash/datasets/glove',
+#                   dict_size=dict_size,textType='nw_excluded')
+    T.loadOrComputeTextSeq(loadOrCompute='load',dict_size=dict_size,
+                           max_seq_len=max_seq_len)
+    mdl=gru_glove_model(T,modelParams)
+    mdl.fit(save_model_path,epochs=10,patience=1)
+    mdl.predict(dstDir=submissionsDir,loadModel=True,
+                modelPath=save_model_path)    
+    
 
 elif model=='RF':
     s= '_dictsize_{}'.format(dict_size)
@@ -86,12 +105,13 @@ elif model=='lgbm':
     
     
 elif model=='ensemble':
-    weights=[3,6,3,0]
+    weights=[3,6,3,0,3]
     modelsOutDir='/home/arash/datasets/Kaggle/Toxic/submissions'
     filenames=['gru_seqlen_50_dictsize_20000.csv',
                'lgbm_dictsize_20000.csv',
                'model1_cnn_seqlen_50_dicsize_20000.csv',
-               'RF_dictsize_20000.csv']
+               'RF_dictsize_20000.csv',
+               'gru_glove_seqlen_50_dictsize_20000.csv']
     ensembleModels(modelsOutDir,filenames,weights)
     
     

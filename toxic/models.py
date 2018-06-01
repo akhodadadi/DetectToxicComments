@@ -235,7 +235,7 @@ class gru_model(KerasModels):
                                        'n_units1':100,'n_units2':100}):
     
         '''
-        This function initialize a conv. neural netwok model with the 
+        This function initialize a neural netwok model with the 
         following architecture:
             The input is sequence of words. The first layer is an embedding
             layer. The input layer is followed by two layers od GRU units.
@@ -300,7 +300,105 @@ class gru_model(KerasModels):
         
         self.model = Model(inputs=inputs,outputs=out)
         
+class gru_glove_model(KerasModels):
+    
+    def __init__(self,tox,modelParams={'embed_dim':100,'n_dense':50,
+                                       'n_units1':100,'n_units2':100,
+                                       'glove_embed_dim':50,
+                                       'textType':'nw_excluded'}):
+    
+        '''
+        This function initialize a neural netwok model with the 
+        following architecture:
+            The input is sequence of words. The input is fed into a network
+            which is similar to the network used in `gru_model`.
+            The difference is that here the input sequences 
+            are also passed to an embeddig layer whose weights
+            are obtained from Glove pre-trained model. The output of this
+            layer is augmented with the output of the secong GRU
+            layer and then is fed to the fully connected layers.
+            
+            see: 
+            https://blog.keras.io/using-pre-trained-word-embeddings-in-a-keras
+            -model.html
+             
+            
+        Parameters
+        ----------  
+        tox: base.Toxic
+            An object of class base.Toxic.
+        modelParams: dict
+            it must contain the following fields:
+                `embed_dim`: dimension of the output of emebdding layer,
+                `n_units1`: number of neurons in the first GRU layer.
+                `n_units2`: number of neurons in the second GRU layer.
+                'n_dense': number of neurons of the dense layer.
+                `glove_embed_dim`: embedding dimension of glove features.
+                `textType`: see base.Toxic.loadData() for details.
+        '''
+        self.model=None
+        self.tox=tox
+        self.__buildModel__(modelParams)  
         
+    def __buildModel__(self,modelParams):
+        '''
+        This function builds the model.
+        '''
+        
+        #===model parameters===
+        embed_dim,n_units1,n_units2,n_dense,glove_embed_dim,textType=\
+            (modelParams['embed_dim'],
+             modelParams['n_units1'],
+             modelParams['n_units2'],
+             modelParams['n_dense'],
+             modelParams['glove_embed_dim'],
+             modelParams['textType'])
+        ext={'raw':'raw','sw_excluded':'sw',
+             'nw_excluded':'nw'}[textType]
+        #===model parameters===
+        
+        #===build model===
+        #-input layer-
+        max_seq_len=self.tox.trainFeatureMat.shape[1]
+        dict_size=np.max((self.tox.trainFeatureMat.max(),
+                          self.tox.testFeatureMat.max()))
+        inputs = Input(shape=(max_seq_len,))
+        #-input layer-
+
+        #-glove embedding-
+        #load embedding weights
+        fn=join(self.tox.dataDir,'embed_weights_dictsize_{}_d_{}_{}'.\
+                format(dict_size+1,glove_embed_dim,ext))
+        weights=np.fromfile(fn).reshape((-1,glove_embed_dim))
+        glove_embed = Embedding(input_dim=weights.shape[0],
+                                output_dim=glove_embed_dim,
+                                input_length=max_seq_len,
+                                trainable=False,weights=[weights])(inputs)
+        #-glove embedding-
+        
+        #-trainable embedding layer-
+        embed = Embedding(input_dim=dict_size+1,output_dim=embed_dim,
+                          input_length=max_seq_len)(inputs)
+        #-trainable embedding layer-
+
+        #-GRU layers-
+        rl1=GRU(units=n_units1,return_sequences=True)(embed)
+        rl2=GRU(units=n_units2)(rl1)        
+        #-GRU layers-
+        
+        #-augment glove and gru features-
+        feat = concatenate([rl2,Flatten()(glove_embed)])
+        #-augment glove and gru features-
+        
+        #-dense layer-
+        dense1=Dense(n_dense,activation='relu')(feat)
+        #-dense layer-
+        
+        #-output-
+        out = Dense(6,activation='sigmoid')(dense1)
+        #-output-
+        
+        self.model = Model(inputs=inputs,outputs=out)        
         
 #=======================
 #decision tree models
