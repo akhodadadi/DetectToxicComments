@@ -6,7 +6,7 @@ from os.path import join
 
 dict_size=20000
 max_seq_len=50
-model='ensemble'
+model='ensemble1'
 dataDir=toxic_config.DATADIR
 print('\014')
 

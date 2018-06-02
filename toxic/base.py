@@ -1,5 +1,5 @@
 from . import toxic_config
-from os.path import join
+from os.path import join,exists
 from time import ctime
 import pandas as pd
 import re
@@ -15,6 +15,8 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 #keras
 from keras.preprocessing.text import Tokenizer
 from keras.preprocessing.sequence import pad_sequences
+from keras.layers import Input,Embedding,AveragePooling1D,Flatten
+from keras.models import Model
 
 def cleanText(text,removeStopWords=True):
     '''
@@ -273,7 +275,7 @@ class Toxic():
             self.Y_train=np.fromfile(fn,'int8').reshape((-1,6))
             
     def computeGlove(self,embed_dim,glovePath,dict_size=50000,
-                           textType='nw_excluded'):
+                     textType='nw_excluded'):
         '''
         This function computes and saves the embedding matrix
         corresponding to the Glove features.
@@ -316,13 +318,13 @@ class Toxic():
         T.fit_on_texts(train_texts+test_texts)
         #---tokenizing the texts---
         
-        #---form a df containing words and thier index and count---
+        #---form a df containing words and their index and count---
         words_df=pd.DataFrame({'word':T.word_index.keys(),
                                'word_idx':T.word_index.values()})
         df=pd.DataFrame({'word':T.word_counts.keys(),
                          'word_count':T.word_counts.values()})
         words_df=words_df.merge(df,on='word')
-        #---form a df containing words and thier index and count---
+        #---form a df containing words and their index and count---
         
         #---loading glove weights---
         print(ctime()+'...loading glove weights into pandas df...')
@@ -337,6 +339,8 @@ class Toxic():
         words_df.fillna(0,inplace=True)
         words_df.sort_values(by='word_idx',inplace=True)
         embedding_weights=words_df.iloc[:,3:].values
+        embedding_weights=np.vstack((np.zeros((1,embed_dim)),
+                                     embedding_weights))
         #---merge word_df and glove_df---
         
         #---save the weights---
@@ -345,4 +349,117 @@ class Toxic():
                 format(dict_size,embed_dim,ext))
         embedding_weights.tofile(fn)
         #---save the weights---
+        
+        
+    def loadOrComputeAvgGlove(self,embed_dim,dict_size,max_seq_len,
+                              textType='nw_excluded',loadOrCompute='compute'):
+        '''
+        Loads or computes the average of the Glove 
+        representation of words for each text in the corpus. So, each
+        text will be represented by one vector which is obtained by
+        averaging the Glove features of the words in the text.
+        
+        The method `computeGlove` should be called before this method
+        is called. The method first checks if thweights exists in
+        self.dataDir, if not it throws an error.
+        
+        The average glove feature is computed as follows: a neral
+        network with one embedding layer and one output layer is built
+        using Keras. The weights of the embedding layer are the Glove
+        weights. The input to the network will be the texts' word sequences.
+        The output is the average of the output of the embedding layer.
+        Note that the output of the embedding layer has the shape
+        (batch_size,max_seq_len,embed_dim) and we should compute 
+        the average of the second dimension.
+        
+        Parameters
+        ----------          
+        embed_dim: int
+            glove embedding dimension. It should be one of [50,100,200,300].
+        dict_size: int
+            vocabulary size
+        max_seq_len: int
+            maximum length of the sequence of words
+        textType: str
+            see `self.loadData` for details.
+        '''
+        
+        if loadOrCompute=='compute':
+            #---check if embed_dim has a legal value---
+            if embed_dim not in [50,100,200,300]:
+                msg='embed_dim should be one of the following:[50,100,200,300]'
+                raise ValueError(msg) 
+            #---check if embed_dim has a legal value---
+            
+            #---check if Glove weights file exist---
+            ext={'raw':'raw','sw_excluded':'sw','nw_excluded':'nw'}[textType]        
+            fn=join(self.dataDir,'embed_weights_dictsize_{}_d_{}_{}'.\
+                    format(dict_size,embed_dim,ext))
+            if not exists(fn):
+                msg=\
+                '''Glove weights file does not exists in {}. Please first \
+                call self.computeGlove().
+                '''.format(self.dataDir)
+                raise ValueError(msg)
+            #---check if Glove weights file exist---
+            
+            #---load Glove weights---
+            fn=join(self.dataDir,'embed_weights_dictsize_{}_d_{}_{}'.\
+                    format(dict_size,embed_dim,ext))
+            weights=np.fromfile(fn).reshape((-1,embed_dim))       
+            #---load Glove weights---
+                
+            #---load text sequences if it is not loaded yet---
+            if (len(self.trainFeatureMat)==0) or (len(self.testFeatureMat)==0):
+                self.loadOrComputeTextSeq(dict_size=dict_size,
+                                          max_seq_len=max_seq_len,
+                                          textType=textType,
+                                          loadOrCompute='load')
+            #---load text sequences if it is not loaded yet---
+                    
+            #---build a keras model with an embedding layer---
+            inputs = Input(shape=(max_seq_len,))
+            glove_embed = Embedding(input_dim=weights.shape[0],
+                                    output_dim=embed_dim,
+                                    input_length=max_seq_len,
+                                    trainable=False,weights=[weights])(inputs)
+            avgGlove = Flatten()(AveragePooling1D(pool_size=max_seq_len)\
+                               (glove_embed))
+            
+            model = Model(inputs=inputs,outputs=avgGlove) 
+            #---build a keras model with an embedding layer---
+            
+            #---compute average Glove---
+            print('computing and saving average Glove features for:')
+            
+            print(ctime()+'...train data...')
+            self.trainFeatureMat = model.predict(self.trainFeatureMat)
+            fn=join(self.dataDir,'train_avgGlove_seqlen_dictsize_{}_d_{}'.\
+                    format(max_seq_len,dict_size,embed_dim))
+            self.trainFeatureMat.tofile(fn)
+            
+            print(ctime()+'...test data...')
+            self.testFeatureMat= model.predict(self.testFeatureMat)
+            fn=join(self.dataDir,'test_avgGlove_seqlen_dictsize_{}_d_{}'.\
+                    format(max_seq_len,dict_size,embed_dim))
+            self.testFeatureMat.tofile(fn)        
+            #---compute average Glove---
+            
+        elif loadOrCompute=='load':
+            fn=join(self.dataDir,'train_avgGlove_seqlen_dictsize_{}_d_{}'.\
+                    format(max_seq_len,dict_size,embed_dim))
+            self.trainFeatureMat=np.fromfile(fn,'float32').\
+            reshape((-1,embed_dim))
+            
+            fn=join(self.dataDir,'test_avgGlove_seqlen_dictsize_{}_d_{}'.\
+                    format(max_seq_len,dict_size,embed_dim))
+            self.testFeatureMat=np.fromfile(fn,'float32').\
+            reshape((-1,embed_dim))            
+            
+            
+        
+        
+        
+        
+        
         
