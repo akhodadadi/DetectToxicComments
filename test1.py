@@ -6,14 +6,19 @@ from os.path import join
 
 dict_size=20000
 max_seq_len=50
-model='ensemble1'
+embed_dim=50
+model='gru'
 dataDir=toxic_config.DATADIR
 print('\014')
 
+T= Toxic()
+T.computeGlove(50,glovePath='/home/arash/datasets/glove',
+                   dict_size=dict_size,textType='nw_excluded')
+
 
 if model=='cnn':
-    modelParams={'embed_dim':100,'n_featMap':500,'kernel_size':[3,4,5],
-                 'strides':[1]*3,'d_r':.1}
+    modelParams={'embed_dim':300,'n_featMap':500,'kernel_size':[3,4,5],
+                 'strides':[1]*3,'d_r':.1,'l2_reg':0}
     
     s= '_seqlen_{}_dictsize_{}'.format(max_seq_len,dict_size)
     save_model_path=join(dataDir,'fittedModels/fittedModel_model1_cnn'+s)
@@ -22,13 +27,13 @@ if model=='cnn':
     T= Toxic()
     T.loadOrComputeTextSeq(loadOrCompute='load',dict_size=dict_size,
                            max_seq_len=max_seq_len)
-    cnn=cnn_model(T)
-    #cnn.fit(save_model_path,epochs=1)
+    cnn=cnn_model(T,modelParams)
+    cnn.fit(save_model_path,epochs=10)
     cnn.predict(dstDir=submissionsDir,loadModel=True,
                 modelPath=save_model_path)
 
 elif model=='gru':
-    modelParams={'embed_dim':100,'n_dense':50,'n_units1':100,'n_units2':100}
+    modelParams={'embed_dim':300,'n_dense':50,'n_units1':100,'n_units2':100}
     
     s= '_seqlen_{}_dictsize_{}'.format(max_seq_len,dict_size)
     save_model_path=join(dataDir,'fittedModels/fittedModel_gru'+s)
@@ -80,6 +85,30 @@ elif model=='RF':
     rf.predict(dstDir=submissionsDir,loadModel=True,
                modelPath=save_model_path+'.pkl')
     
+elif model=='lgbm_glove':
+        
+    s= '_dictsize_{}_embed_dim_{}'.format(dict_size,embed_dim)
+    save_model_path=join(dataDir,'fittedModels/fittedModel_lgbm_glove'+s)
+    submissionsDir=join(dataDir,'submissions/lgbm_glove'+s+'.csv')
+    
+    #compute features
+    T= Toxic()
+    T.loadOrComputeAvgGlove(loadOrCompute='load',
+                            embed_dim=50,dict_size=dict_size,
+                            max_seq_len=max_seq_len,textType='nw_excluded')
+    
+    #fit model
+    modelParams = {'num_leaves':100,'learning_rate':.05,
+                   'subsample':.9,'colsample_bytree':.9,'reg_alpha':1.,
+                   'objective':'binary','n_estimators':5000,'silent':False,
+                   'subsample_for_bin':200000}
+#    fitParams = {'early_stopping_rounds':5,'eval_metric':'auc'}
+    fitParams = {'early_stopping_rounds':5}
+    gbm = lgbModel(T,modelParams)
+    gbm.fit(save_model_path,monitor_eval=True,fitParams=fitParams)
+    gbm.predict(dstDir=submissionsDir,loadModel=True,
+                modelPath=save_model_path+'.pkl')
+    
 elif model=='lgbm':
     
     s= '_dictsize_{}'.format(dict_size)
@@ -102,7 +131,6 @@ elif model=='lgbm':
     gbm.fit(save_model_path,monitor_eval=True,fitParams=fitParams)
     gbm.predict(dstDir=submissionsDir,loadModel=True,
                 modelPath=save_model_path+'.pkl')
-    
     
 elif model=='ensemble':
     weights=[3,6,3,0,3]

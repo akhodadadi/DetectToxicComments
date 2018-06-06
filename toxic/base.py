@@ -446,16 +446,24 @@ class Toxic():
             #---compute average Glove---
             
         elif loadOrCompute=='load':
+            #---load train features---
             fn=join(self.dataDir,'train_avgGlove_seqlen_dictsize_{}_d_{}'.\
                     format(max_seq_len,dict_size,embed_dim))
             self.trainFeatureMat=np.fromfile(fn,'float32').\
             reshape((-1,embed_dim))
+            #---load train features---
             
+            #---load test features---
             fn=join(self.dataDir,'test_avgGlove_seqlen_dictsize_{}_d_{}'.\
                     format(max_seq_len,dict_size,embed_dim))
             self.testFeatureMat=np.fromfile(fn,'float32').\
             reshape((-1,embed_dim))            
+            #---load test features---
             
+            #---load target values---
+            fn=join(self.dataDir,'Y_train')                                        
+            self.Y_train=np.fromfile(fn,'int8').reshape((-1,6))
+            #---load target values---
             
         
         

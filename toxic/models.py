@@ -3,6 +3,7 @@ from keras.layers import Input,Conv1D,MaxPool1D,Dense,Dropout,Embedding,\
 Flatten,concatenate,GRU
 from keras.models import Model,load_model
 from keras.callbacks import ModelCheckpoint,EarlyStopping
+from keras import regularizers
 
 #sklearn
 from sklearn.ensemble import RandomForestClassifier
@@ -149,7 +150,8 @@ class cnn_model(KerasModels):
     
     def __init__(self,tox,modelParams={'embed_dim':100,'n_featMap':500,
                                        'kernel_size':[3,4,5],
-                                       'strides':[1]*3,'d_r':.1}):
+                                       'strides':[1]*3,'d_r':.1,
+                                       'l2_reg':1.}):
     
         '''
         This function initialize a conv. neural netwok model with the 
@@ -184,12 +186,13 @@ class cnn_model(KerasModels):
         '''
         
         #===model parameters===
-        embed_dim,n_featMap,kernel_size,strides,d_r=\
+        embed_dim,n_featMap,kernel_size,strides,d_r,l2_reg=\
             (modelParams['embed_dim'],
              modelParams['n_featMap'],
              modelParams['kernel_size'],
              modelParams['strides'],
-             modelParams['d_r'])        
+             modelParams['d_r'],
+             modelParams['l2_reg'])
         #===model parameters===
         
         #===build model===
@@ -223,7 +226,8 @@ class cnn_model(KerasModels):
         #-dropuout and output-
         concat = concatenate([pool0,pool1,pool2])
         features = Dropout(d_r)(Flatten()(concat))
-        out = Dense(6,activation='sigmoid')(features)
+        out = Dense(6,activation='sigmoid',
+                    kernel_regularizer=regularizers.l2(l2_reg))(features)
         #-dropuout and output-
         
         self.model = Model(inputs=inputs,outputs=out)
