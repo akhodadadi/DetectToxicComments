@@ -4,5 +4,5 @@ We will develope three types of model: decision tree models (random forest, and 
 
 The results show that a gradient boosted tree (LightGBM) with tf-idf features achieved the best performance. Also ensembling the models by a simple weighting scheme improved the performance (measured by AUC on the test set) by about 2%.
 
-Please read the full report [here](./Detecting toxic comments.ipynb)
+Please read the full report [here](https://github.com/akhodadadi/DetectToxicComments/blob/master/Detecting%20toxic%20comments.ipynb)
 
